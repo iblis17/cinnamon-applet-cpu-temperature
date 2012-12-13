@@ -6,16 +6,19 @@ const Main = imports.ui.main;
 const GLib = imports.gi.GLib;
 const Util = imports.misc.util;
 const Mainloop = imports.mainloop;
+const Applet = imports.ui.applet;
+const Gettext = imports.gettext.domain('cinnamon-applets');
+const _ = Gettext.gettext;
 
-function CpuTemperature() {
-    this._init.apply(this, arguments);
+function MyApplet(orientation) {
+    this._init(orientation);
 }
 
-CpuTemperature.prototype = {
-    __proto__: PanelMenu.SystemStatusButton.prototype,
+MyApplet.prototype = {
+    __proto__: Applet.TextApplet.prototype,
 
-    _init: function(){
-        PanelMenu.SystemStatusButton.prototype._init.call(this, 'temperature');
+    _init: function(orientation) {
+        Applet.TextApplet.prototype._init.call(this, orientation);
 
         this.lang = {
             'acpi' : 'ACPI Adapter',
@@ -27,31 +30,41 @@ CpuTemperature.prototype = {
             style_class: "temperature-label"
         });
 
-        // destroy all previously created children, and add our statusLabel
-        this.actor.get_children().forEach(function(c) {
-            c.destroy()
-        });
-        this.actor.add_actor(this.statusLabel);
+        
+		try {
 
-        this.sensorsPath = this._detectSensors();
-        this.command=["xdg-open", "http://github.com/xtranophilist/gnome-shell-extension-cpu-temperature/issues/"];
-        if(this.sensorsPath){
-            this.title='Error';
-            this.content='Run sensors-detect as root. If it doesn\'t help, click here to report with your sensors output!';
-        }
-        else{
-            this.title='Warning';
-            this.content='Please install lm_sensors. If it doesn\'t help, click here to report with your sensors output!';
-        }
+			// Create the popup menu
+			this.menu = new Applet.AppletPopupMenu(this, orientation);
 
-        this._update_temp();
-        //update every 15 seconds
-        event = GLib.timeout_add_seconds(0, 15, Lang.bind(this, function () {
-            this._update_temp();
-            return true;
-        }));
+        	this.sensorsPath = this._detectSensors();
+
+			//this.command=["xdg-open", "http://github.com/xtranophilist/gnome-shell-extension-cpu-temperature/issues/"];
+			
+
+			if(this.sensorsPath){
+				this.title='Error';
+				this.content='Run sensors-detect as root. If it doesn\'t help, click here to report with your sensors output!';
+			}
+			else{
+				this.title='Warning';
+				this.content='Please install lm_sensors. If it doesn\'t help, click here to report with your sensors output!';
+			}
+			
+						
+            this.set_applet_tooltip(_("Temperature"))
+            
+			this._update_temp();
+			
+        }
+        catch (e) {
+            global.logError(e);
+        }
+     },
+
+    on_applet_clicked: function(event) {
+		this.menu.toggle();
     },
-
+    
     _detectSensors: function(){
         //detect if sensors is installed
         let ret = GLib.spawn_command_line_sync("which sensors");
@@ -60,18 +73,19 @@ CpuTemperature.prototype = {
         }
         return null;
     },
-
+    
+    
+    
     _update_temp: function() {
         let items = new Array();
         let tempInfo=null;
         if (this.sensorsPath){
+            
             let sensors_output = GLib.spawn_command_line_sync(this.sensorsPath);//get the output of the sensors command
+            
             if(sensors_output[0]) tempInfo = this._findTemperatureFromSensorsOutput(sensors_output[1].toString());//get temperature from sensors
+            
             if (tempInfo){
-                //destroy all items in popup
-                this.menu.box.get_children().forEach(function(c) {
-                    c.destroy()
-                });
                 var s=0, n=0;//sum and count
                 for (let adapter in tempInfo){
                     if(adapter!=0){
@@ -93,30 +107,31 @@ CpuTemperature.prototype = {
                         }
                     }
                 }
+                
+                
                 if (n!=0){//if temperature is detected
                     this.title=this._formatTemp(s/n);//set title as average
                 }
             }
         }
-        //if we don't have the temperature yet, use some known files
-        if(!tempInfo){
-            tempInfo = this._findTemperatureFromFiles();
-            if(tempInfo.temp){
-                this.menu.box.get_children().forEach(function(c) {
-                    c.destroy()
-                });
-                this.title=this._formatTemp(tempInfo.temp);
-                items.push('Current Temperature : '+this._formatTemp(tempInfo.temp));
-                if (tempInfo.crit)
-                    items.push('Critical Temperature : '+this._formatTemp(tempInfo.crit));
-            }
-        }
+        
+		//if we don't have the temperature yet, use some known files
+		if(!tempInfo){
+		    tempInfo = this._findTemperatureFromFiles();
+		    if(tempInfo.temp){
+		        this.title=this._formatTemp(tempInfo.temp);
+		        items.push('Current Temperature : '+this._formatTemp(tempInfo.temp));
+		        if (tempInfo.crit)
+		            items.push('Critical Temperature : '+this._formatTemp(tempInfo.crit));
+		    }
+		}
 
-        this.statusLabel.set_text(this.title);
+		this.set_applet_label(this.title);
         this.menu.box.get_children().forEach(function(c) {
             c.destroy()
         });
-        let section = new PopupMenu.PopupMenuSection("Temperature");
+
+		let section = new PopupMenu.PopupMenuSection("Temperature");
         if (items.length>0){
             let item;
             for each (let itemText in items){
@@ -139,19 +154,23 @@ CpuTemperature.prototype = {
             });
             section.addMenuItem(item);
         }
-        this.menu.addMenuItem(section);
-    },
+		this.menu.addMenuItem(section);
 
-    _createSectionForText: function(txt){
-        let section = new PopupMenu.PopupMenuSection("Temperature");
-        let item = new PopupMenu.PopupMenuItem("");
-        item.addActor(new St.Label({
-            text:txt,
-            style_class: "sm-label"
-        }));
-        section.addMenuItem(item);
-        return section;
-    },
+        //update every 5 seconds
+		Mainloop.timeout_add(5000, Lang.bind(this, this._update_temp));
+    
+	},
+	
+	_createSectionForText: function(txt){
+		    let section = new PopupMenu.PopupMenuSection("Temperature");
+		    let item = new PopupMenu.PopupMenuItem("");
+		    item.addActor(new St.Label({
+		        text:txt,
+		        style_class: "sm-label"
+		    }));
+		    section.addMenuItem(item);
+		    return section;
+		},
 
     _findTemperatureFromFiles: function(){
         let info = new Array();
@@ -198,7 +217,8 @@ CpuTemperature.prototype = {
         return info;
     },
 
-    _findTemperatureFromSensorsOutput: function(txt){
+	
+	_findTemperatureFromSensorsOutput: function(txt){
         let senses_lines=txt.split("\n");
         let line = '';
         let type = '';
@@ -304,7 +324,6 @@ CpuTemperature.prototype = {
                         }
                         break;
 
-
                     default:
                         break;
                 }
@@ -314,14 +333,15 @@ CpuTemperature.prototype = {
         }
         return s;
     },
-
+	
+	
     _isAdapter: function(line){
         if(line.substr(0, 8)=='Adapter:') {
             return true;
         }
         return false;
     },
-
+    
     _getHigh: function(t){
         let r;
         return (r=/high=\+(\d{1,3}.\d)/.exec(t))?parseFloat(r[1]):null;
@@ -351,6 +371,8 @@ CpuTemperature.prototype = {
         //return this._toFahrenheit(t).toString()+"\u1d3cF";
         return (Math.round(t*10)/10).toFixed(1).toString()+"\u1d3cC";
     }
+    
+    
 }
 
 //for debugging
@@ -359,20 +381,8 @@ function debug(a){
     Util.spawn(['echo',a]);
 }
 
-function init() {
-//do nothing
-}
 
-let indicator;
-let event=null;
-
-function enable() {
-    indicator = new CpuTemperature();
-    Main.panel.addToStatusArea('temperature', indicator);
-}
-
-function disable() {
-    indicator.destroy();
-    Mainloop.source_remove(event);
-    indicator = null;
+function main(metadata, orientation) {
+    let myApplet = new MyApplet(orientation);
+    return myApplet;
 }
